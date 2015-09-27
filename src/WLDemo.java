@@ -1,4 +1,6 @@
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -20,6 +22,7 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 
 public class WLDemo extends Configured implements Tool {
+	static int Top_k_Items = 10;
 
 	public static class WLMapper1 extends
 			Mapper<LongWritable, Text, Text, IntWritable> {
@@ -64,27 +67,33 @@ public class WLDemo extends Configured implements Tool {
 
 	public static class WLMapper2 extends
 			Mapper<LongWritable, Text, IntWritable, Text> {
-		// Our output key and value Writables
-		private TreeMap<Integer, String> repToRecordMap = new TreeMap<Integer, String>();
-
-		// int count = 0;
+		private TreeMap<Integer, List<String>> records = new TreeMap<Integer, List<String>>();
 
 		@Override
 		public void map(LongWritable key, Text value, Context context)
 				throws IOException, InterruptedException {
 			// Parse the input string into a nice map
-			// System.out.println(value.toString());
+
 			if (value.toString().contains("\t")) {
-				// System.out.println("Inside");
+
 				String[] arr = value.toString().split("\t");
 				if (arr.length > 1) {
-					// System.out.println(arr[1]);
-
-					repToRecordMap.put(Integer.parseInt(arr[1]), arr[0]);
-					if (repToRecordMap.size() > 10) {
-						repToRecordMap.remove(repToRecordMap.firstKey());
+					System.out.println(arr[1]);
+					Integer k = Integer.parseInt(arr[1]);
+					List<String> keyVal = new ArrayList<String>();
+					if (records.containsKey(k)) {
+						keyVal = records.get(k);
 
 					}
+					keyVal.add(arr[0]);
+
+					records.put(Integer.parseInt(arr[1]), keyVal);
+
+					if (records.size() > Top_k_Items) {
+						records.remove(records.firstKey());
+
+					}
+
 				}
 			}
 
@@ -94,27 +103,33 @@ public class WLDemo extends Configured implements Tool {
 		protected void cleanup(Context context) throws IOException,
 				InterruptedException {
 
-			for (Map.Entry<Integer, String> entry : repToRecordMap.entrySet()) {
-				Integer key = entry.getKey();
-				String value = entry.getValue();
+			for (Map.Entry<Integer, List<String>> entry : records.entrySet()) {
 
-				context.write(new IntWritable(key), new Text(value));
+				Integer key = entry.getKey();
+				List<String> value = entry.getValue();
+
+				for (String val : value) {
+					context.write(new IntWritable(key), new Text(val));
+				}
 			}
+
 		}
+
 	}
 
 	public static class WLReducer2 extends
 			Reducer<IntWritable, Text, Text, IntWritable> {
-		// private TreeMap<String, Integer> repToRecordMap = new TreeMap<String,
-		// Integer>();
+		int count = 0;
 
 		@Override
 		protected void reduce(IntWritable key, Iterable<Text> values,
 				Context context) throws IOException, InterruptedException {
 
 			for (Text x : values) {
-				context.write(new Text(x.toString()), key);
-
+				if (count < Top_k_Items) {
+					context.write(new Text(x), key);
+					count = count + 1;
+				}
 			}
 
 		};
@@ -130,7 +145,6 @@ public class WLDemo extends Configured implements Tool {
 		public int compare(WritableComparable w1, WritableComparable w2) {
 			// TODO Auto-generated method stub
 
-			// Logger.error("--------------------------> writing Keycompare data = ----------->");
 			IntWritable ip1 = (IntWritable) w1;
 			IntWritable ip2 = (IntWritable) w2;
 			int cmp = -1 * ip1.compareTo(ip2);
@@ -198,7 +212,7 @@ public class WLDemo extends Configured implements Tool {
 		job2.setOutputKeyClass(Text.class);
 		job2.setOutputValueClass(IntWritable.class);
 		job2.setSortComparatorClass(KeyComparator.class);
-		// job2.setNumReduceTasks(0);
+		job2.setNumReduceTasks(1);
 		succ = job2.waitForCompletion(true);
 		if (!succ) {
 			System.out.println("Job2 failed, exiting");
